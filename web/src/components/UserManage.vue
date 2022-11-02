@@ -29,14 +29,14 @@
           type="selection"
           width="25"
           :selectable="isUserSelectable"
-          fixed
+          :fixed="$store.state.miniInterface"
         >
         </el-table-column>
         <el-table-column
           property="username"
           label="用户名"
           min-width="100"
-          fixed
+          :fixed="$store.state.miniInterface"
         ></el-table-column>
         <el-table-column
           property="lastLoginAt"
@@ -102,6 +102,13 @@
         @click="deleteUserList"
         >批量删除</el-button
       >
+      <el-button
+        type="primary"
+        size="medium"
+        class="float-left"
+        @click="deleteUserBookSource"
+        >删除用户书源</el-button
+      >
       <span class="check-tip">已选择 {{ manageUserSelection.length }} 个</span>
       <el-button size="medium" @click="cancel">取消</el-button>
     </div>
@@ -125,7 +132,7 @@ export default {
       manageUserSelection: []
     };
   },
-  props: ["show", "rule", "isAdd"],
+  props: ["show"],
   computed: {
     ...mapGetters(["dialogWidth", "dialogTop", "dialogContentHeight"]),
     userList: {
@@ -197,6 +204,36 @@ export default {
         },
         error => {
           this.$message.error("删除用户失败 " + (error && error.toString()));
+        }
+      );
+    },
+    async deleteUserBookSource() {
+      if (!this.manageUserSelection.length) {
+        this.$message.error("请选择需要删除书源的用户");
+        return;
+      }
+      const res = await this.$confirm("确认要删除所选择的用户书源吗?", "提示", {
+        confirmButtonText: "确定",
+        cancelButtonText: "取消",
+        type: "warning"
+      }).catch(() => {
+        return false;
+      });
+      if (!res) {
+        return;
+      }
+      Axios.post(
+        this.api + "/deleteUserBookSource",
+        this.manageUserSelection.map(v => v.username)
+      ).then(
+        res => {
+          if (res.data.isSuccess) {
+            this.manageUserSelection = [];
+            this.$message.success("操作成功");
+          }
+        },
+        error => {
+          this.$message.error("操作失败 " + (error && error.toString()));
         }
       );
     },

@@ -45,13 +45,11 @@
 
 数据存储目录结构如下：
 
-> 书籍缓存目录由 `书名` 变为 `书名_作者名`，这个变动需要手动编辑，否则书籍书源列表缓存信息无法使用
-
 ```bash
 storage
 ├── assets                                        # 静态资源
-│   |── covers                                    # 本地 epub 书籍的封面图片目录
 │   ├── hector                                    # 用户 hector 的资源目录
+│   |   |── covers                                # 本地 epub 书籍的封面图片目录
 │   │   ├── background                            # 自定义阅读背景图片保存目录
 │   │   │   └── 6.jpg
 │   └── reader.css                                # 自定义CSS样式文件
@@ -268,6 +266,14 @@ docker run -d --restart=always --name=reader -e "SPRING_PROFILES_ACTIVE=prod" -e
 
 # 通过watchtower手动更新
 docker run --rm -v /var/run/docker.sock:/var/run/docker.sock containrrr/watchtower --cleanup --run-once reader
+
+# 使用 remote-webview 功能
+# 1.创建 remote-webview 容器
+docker run -d --network host --restart=always hectorqin/remote-webview
+# 2.重建 reader 容器
+reader使用宿主机网络：--network host
+reader添加环境变量：-e "READER_APP_REMOTEWEBVIEWAPI=http://localhost:8050"
+获取reader添加参数：--reader.app.remoteWebviewApi=http://localhost:8050"
 ```
 
 ### Docker-Compose版(推荐)
@@ -331,8 +337,8 @@ server {
 
     location / {
         proxy_pass  http://127.0.0.1:4396; #端口自行修改为映射端口
-        proxy_http_version	1.1;
-        proxy_cache_bypass	$http_upgrade;
+        proxy_http_version 1.1;
+        proxy_cache_bypass $http_upgrade;
         proxy_set_header Upgrade           $http_upgrade;
         proxy_set_header Connection        "upgrade";
         proxy_set_header Host              $host;

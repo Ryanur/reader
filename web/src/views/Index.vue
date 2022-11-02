@@ -133,7 +133,7 @@
               @click="toDetail(readingRecent)"
               :class="{ 'no-point': readingRecent.bookUrl == '' }"
             >
-              {{ readingRecent.bookName }}
+              {{ readingRecent.name }}
             </el-tag>
           </div>
         </div>
@@ -242,6 +242,14 @@
               type="info"
               :effect="$store.getters.isNight ? 'dark' : 'light'"
               class="setting-btn"
+              @click="showBookManage"
+            >
+              书籍管理
+            </el-tag>
+            <el-tag
+              type="info"
+              :effect="$store.getters.isNight ? 'dark' : 'light'"
+              class="setting-btn"
               @click="showManageBookGroup"
             >
               分组管理
@@ -292,6 +300,12 @@
               v-if="$store.state.isSecureMode && $store.state.userInfo.username"
               @click="logout()"
               >注销</span
+            >
+            <span
+              class="right-text"
+              v-else
+              @click="$store.commit('setShowLogin', true)"
+              >登录</span
             >
           </div>
           <div class="setting-item" v-if="$store.state.showManagerMode">
@@ -535,27 +549,14 @@
         </div>
       </div>
       <div class="book-group-wrapper" v-if="!isSearchResult">
-        <el-tag
-          type="info"
-          :effect="$store.getters.isNight ? 'dark' : 'light'"
-          class="book-group-btn"
-          :class="showBookGroup === group.groupId ? 'selected' : ''"
-          v-for="group in bookGroupDisplayList"
-          :key="'bookGroup-' + group.groupId"
-          @click="showBookGroup = group.groupId"
-        >
-          {{ group.groupName }}
-        </el-tag>
-        <el-tag
-          type="info"
-          :effect="$store.getters.isNight ? 'dark' : 'light'"
-          class="book-group-btn"
-          :key="'bookGroup-manage'"
-          v-if="$store.getters.isNormalPage && bookGroupDisplayList.length"
-          @click="showManageBookGroup"
-        >
-          管理
-        </el-tag>
+        <el-tabs class="book-group-tabs" v-model="showBookGroupString" stretch>
+          <el-tab-pane
+            v-for="group in bookGroupDisplayList"
+            :label="group.groupName"
+            :name="'' + group.groupId"
+            :key="'bookGroup-' + group.groupId"
+          ></el-tab-pane>
+        </el-tabs>
       </div>
       <div
         class="books-wrapper"
@@ -644,7 +645,7 @@
                   type="success"
                   :effect="isNight ? 'dark' : 'light'"
                   class="setting-connect"
-                  @click.stop="saveBook(book)"
+                  @click.stop="addBookToShelf(book)"
                 >
                   加入书架
                 </el-tag>
@@ -727,6 +728,12 @@
           <span
             v-if="!isShowFailureBookSource"
             class="float-right span-btn"
+            @click="deleteBookSourceFile()"
+            >恢复默认</span
+          >
+          <span
+            v-if="!isShowFailureBookSource"
+            class="float-right span-btn"
             @click="exportBookSource()"
             >导出</span
           >
@@ -788,7 +795,7 @@
           <el-table-column
             type="selection"
             width="25"
-            fixed
+            :fixed="$store.state.miniInterface"
             :selectable="isBookSourceSelectable"
           >
           </el-table-column>
@@ -796,7 +803,7 @@
             property="bookSourceName"
             label="书源名称"
             min-width="120"
-            fixed
+            :fixed="$store.state.miniInterface"
           ></el-table-column>
           <el-table-column
             property="bookSourceUrl"
@@ -905,6 +912,24 @@
               <el-input v-model="importBookInfo.author" size="small">
               </el-input>
             </div>
+            <div>
+              <span>分组：</span>
+              <el-select
+                size="mini"
+                v-model="importBookGroup"
+                filterable
+                multiple
+                placeholder="未分组"
+              >
+                <el-option
+                  v-for="(bookGroup, index) in bookGroupSetList"
+                  :key="'bookGroup-' + index"
+                  :label="bookGroup.groupName"
+                  :value="bookGroup.groupId"
+                >
+                </el-option>
+              </el-select>
+            </div>
             <div v-if="isShowTocRule">
               <span>规则：</span>
               <el-select
@@ -966,10 +991,13 @@
 
     <LocalStore
       v-model="showLocalStoreManageDialog"
-      @importFromLocalStorePreview="importMultiBooks"
+      @importFromLocalPathPreview="importMultiBooks"
     ></LocalStore>
 
-    <WebDAV v-model="showWebDAVManageDialog"></WebDAV>
+    <WebDAV
+      v-model="showWebDAVManageDialog"
+      @importFromLocalPathPreview="importMultiBooks"
+    ></WebDAV>
   </div>
 </template>
 
@@ -985,6 +1013,7 @@ import eventBus from "../plugins/eventBus";
 import { formatSize, LimitResquest } from "../plugins/helper";
 const buildURL = require("axios/lib/helpers/buildURL");
 import { isInContainer } from "element-ui/src/utils/dom";
+import Vue from "vue";
 
 export default {
   components: {
@@ -1051,6 +1080,7 @@ export default {
         concurrent: 5
       },
       importBookInfo: {},
+      importBookGroup: [],
       importBookChapters: [],
       showImportBookDialog: false,
 
@@ -1126,6 +1156,15 @@ export default {
         this.importBookInfo.tocUrl = val;
       }
     },
+    importBookGroup(val) {
+      if (val && this.showImportBookDialog) {
+        let groupId = 0;
+        val.forEach(v => {
+          groupId |= v;
+        });
+        this.importBookInfo.group = groupId;
+      }
+    },
     showBookGroup() {
       this.$nextTick(() => {
         // 手动处理 el-image 图片加载
@@ -1140,7 +1179,16 @@ export default {
     window.shelfPage = this;
     this.init();
     eventBus.$on("onSourceFileChange", (event, isRssSource) => {
+      if (this._inactive) {
+        return;
+      }
       this.onSourceFileChange(event, isRssSource);
+    });
+    eventBus.$on("editBook", (book, isAdd, onSuccess) => {
+      if (this._inactive) {
+        return;
+      }
+      this.editBook(book, isAdd, onSuccess);
     });
   },
   activated() {
@@ -1422,19 +1470,31 @@ export default {
         // return;
       }
       this.$store.commit("setReadingBook", {
-        bookName: book.bookName || book.name,
+        name: book.name,
         bookUrl: book.bookUrl,
         index: book.index ?? book.durChapterIndex ?? 0,
         type: book.type,
         coverUrl: this.getBookCoverUrl(book),
+        tocUrl: book.tocUrl,
         author: book.author,
         origin: book.origin,
+        originName: book.originName,
         latestChapterTitle: book.latestChapterTitle,
         intro: book.intro
       });
       this.$router.push({
         path: "/reader" + (this.isSearchResult ? "?search=1" : "")
       });
+    },
+    async addBookToShelf(book) {
+      const customImportBookInfo = await this.customImportBookInfo({
+        title: "设置分组",
+        cancelButtonText: "暂不加入"
+      });
+      if (customImportBookInfo === false) {
+        return;
+      }
+      this.saveBook({ ...book, ...customImportBookInfo });
     },
     saveBook(book, isImport, isEdit) {
       if (!book || !book.bookUrl || !book.origin) {
@@ -1506,7 +1566,7 @@ export default {
         }
       );
     },
-    editBook(book, isAdd) {
+    editBook(book, isAdd, onSuccess) {
       if (!book || !book.name || !book.bookUrl || !book.origin) {
         this.$message.error("书籍信息错误");
         return;
@@ -1550,6 +1610,9 @@ export default {
             }
             this.saveBook(newBook, false, true).then(() => {
               close();
+              if (onSuccess) {
+                onSuccess();
+              }
             });
           } catch (e) {
             this.$message.error("书籍信息必须是JSON格式");
@@ -2015,8 +2078,7 @@ export default {
       if (!res) {
         return;
       }
-      const userConfig = {};
-      Axios.get(this.api + "/getUserConfig", userConfig).then(
+      Axios.get(this.api + "/getUserConfig").then(
         res => {
           if (res.data.isSuccess) {
             for (const key in res.data.data) {
@@ -2204,6 +2266,7 @@ export default {
             } else {
               //
               this.importBookInfo = res.data.data[0].book;
+              this.importBookGroup = [];
               this.importBookChapters = res.data.data[0].chapters;
               this.showImportBookDialog = true;
             }
@@ -2221,6 +2284,7 @@ export default {
       }
       if (books.length == 1) {
         this.importBookInfo = books[0].book;
+        this.importBookGroup = [];
         this.importBookChapters = books[0].chapters;
         this.showImportBookDialog = true;
         return;
@@ -2243,9 +2307,16 @@ export default {
         return;
       }
       if (res) {
+        const customImportBookInfo = await this.customImportBookInfo();
+        if (customImportBookInfo === false) {
+          return;
+        }
         for (let i = 0; i < books.length; i++) {
           const book = books[i];
-          await this.saveBook(book.book, true).catch(() => {});
+          await this.saveBook(
+            { ...book.book, ...customImportBookInfo },
+            true
+          ).catch(() => {});
         }
       } else {
         for (let i = 0; i < books.length; i++) {
@@ -2259,6 +2330,7 @@ export default {
     waitForImportBook(bookInfo) {
       return new Promise(resolve => {
         this.importBookInfo = bookInfo.book;
+        this.importBookGroup = [];
         this.importBookChapters = bookInfo.chapters;
         this.showImportBookDialog = true;
         this.$once("importEnd", resolve);
@@ -2267,6 +2339,7 @@ export default {
     importBookDialogClosed() {
       const url = this.importBookInfo.bookUrl;
       this.importBookInfo = {};
+      this.importBookGroup = [];
       this.importBookChapters = [];
       this.importUsedTxtRule = "";
       this.$nextTick(() => {
@@ -2289,6 +2362,73 @@ export default {
           //
         }
       );
+    },
+    async customImportBookInfo(options) {
+      this.importBookGroup = [];
+      const res = await this.$msgbox({
+        title: "统一设置分组",
+        message: this.renderComp(),
+        showCancelButton: true,
+        confirmButtonText: "确定",
+        cancelButtonText: "取消导入",
+        ...(options || {})
+      }).catch(action => {
+        return action === "close" ? "close" : false;
+      });
+      if (res === "confirm") {
+        return {
+          group: this.importBookGroup.reduce((v, c) => v | c, 0)
+        };
+      } else {
+        return false;
+      }
+    },
+    renderComp() {
+      var bookGroupList = this.bookGroupSetList;
+      var shelf = this;
+      Vue.component("custComp", {
+        render() {
+          return (
+            <div style={{ textAlign: "center" }}>
+              <span>请选择分组：</span>
+              <el-select
+                size="mini"
+                vModel={this.importBookGroup}
+                ref="bookGroupSelect"
+                filterable={true}
+                multiple={true}
+                placeholder="未分组"
+                vOn:change={this.change}
+              >
+                {bookGroupList.map((bookGroup, index) => {
+                  return (
+                    <el-option
+                      key={"bookGroup-" + index}
+                      label={bookGroup.groupName}
+                      value={bookGroup.groupId}
+                    ></el-option>
+                  );
+                })}
+              </el-select>
+            </div>
+          );
+        },
+        data() {
+          return {
+            importBookGroup: []
+          };
+        },
+        methods: {
+          change() {
+            shelf.importBookGroup = this.importBookGroup;
+          }
+        }
+      });
+      var custComp = Vue.component("custComp");
+      return this.$createElement(custComp);
+    },
+    showBookManage() {
+      eventBus.$emit("showBookManageDialog");
     },
     showManageBookGroup() {
       this.loadBookGroup(true);
@@ -2358,13 +2498,36 @@ export default {
         res => {
           if (res.data.isSuccess) {
             //
-            this.loadBookSource(true);
             this.$message.success("清空书源成功");
             this.loadBookSource(true);
           }
         },
         error => {
           this.$message.error("清空书源失败 " + (error && error.toString()));
+        }
+      );
+    },
+    async deleteBookSourceFile() {
+      const res = await this.$confirm(`确认要恢复默认书源吗?`, "提示", {
+        confirmButtonText: "确定",
+        cancelButtonText: "取消",
+        type: "warning"
+      }).catch(() => {
+        return false;
+      });
+      if (!res) {
+        return;
+      }
+      Axios.post(this.api + "/deleteBookSourcesFile").then(
+        res => {
+          if (res.data.isSuccess) {
+            //
+            this.$message.success("恢复默认书源成功");
+            this.loadBookSource(true);
+          }
+        },
+        error => {
+          this.$message.error("操作失败 " + (error && error.toString()));
         }
       );
     },
@@ -2658,11 +2821,11 @@ export default {
       return this.$store.state.connected ? "success" : "danger";
     },
     readingRecent() {
-      return this.$store.state.readingBook &&
-        this.$store.state.readingBook.bookName
-        ? this.$store.state.readingBook
+      return this.$store.getters.readingBook &&
+        this.$store.getters.readingBook.name
+        ? this.$store.getters.readingBook
         : {
-            bookName: "尚无阅读记录",
+            name: "尚无阅读记录",
             bookUrl: "",
             index: 0
           };
@@ -2780,6 +2943,17 @@ export default {
           showBookGroup: val
         });
       }
+    },
+    showBookGroupString: {
+      get() {
+        return "" + this.showBookGroup;
+      },
+      set(val) {
+        this.showBookGroup = +val;
+      }
+    },
+    bookGroupSetList() {
+      return this.$store.state.bookGroupList.filter(v => v.groupId > 0);
     },
     bookGroupDisplayList() {
       return this.$store.state.bookGroupList
@@ -3054,11 +3228,12 @@ export default {
     }
 
     .book-group-wrapper {
-      display: flex;
-      flex-direction: row;
-      overflow-x: auto;
       padding: 5px 0;
       margin-bottom: 10px;
+
+      .book-group-tabs {
+        width: 100%;
+      }
 
       .book-group-btn {
         margin-right: 10px;
@@ -3508,5 +3683,8 @@ export default {
 
 .mini-interface .el-dialog__body {
   padding: 15px 20px;
+}
+.book-group-tabs .el-tabs__header {
+  margin-bottom: 0px;
 }
 </style>
